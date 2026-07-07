@@ -517,6 +517,7 @@ select:focus{border-color:var(--gold)}
   justify-content:space-between;
   margin-bottom:14px;
 }
+.wiring-actions{display:flex;gap:8px}
 .wiring-title{
   font-family:'Bricolage Grotesque',sans-serif;
   font-size:16px;

@@ -1,4 +1,4 @@
-import { HEADER_HEIGHT, PORT_PADDING, PORT_ROW, DEVICE_TYPES } from './constants.js'
+import { HEADER_HEIGHT, PORT_PADDING, PORT_ROW, DEVICE_WIDTH, COLORS, CAT_COLORS, DEVICE_TYPES } from './constants.js'
 
 let _idc = 100
 export function uid(p) {
@@ -191,4 +191,93 @@ export function getDeviceHeight(device) {
 
 export function rectIntersect(x1, y1, w1, h1, x2, y2, w2, h2) {
   return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2
+}
+
+/**
+ * Build a standalone SVG string for the topology export (ADR-0006).
+ * Simplified visual: device rectangles + port dots + connection curves + wire numbers.
+ * Wire numbers match WiringPlanTab's String(i+1).padStart(2,'0') ordering.
+ *
+ * @param devices        project devices array
+ * @param connections    project connections array
+ * @param getDeviceType  (deviceId) => DEVICE_TYPES entry
+ * @returns SVG string (with xmlns, sized to fit all devices + margin)
+ */
+export function buildTopologySVG(devices, connections, getDeviceType) {
+  if (devices.length === 0) {
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="#0a0e14"/><text x="200" y="100" fill="#5a6577" font-family="sans-serif" font-size="14" text-anchor="middle">暂无设备</text></svg>'
+  }
+
+  // Compute bounds to size the SVG.
+  let maxX = 0, maxY = 0
+  for (const d of devices) {
+    const h = getDeviceHeight(d)
+    if (d.x + DEVICE_WIDTH > maxX) maxX = d.x + DEVICE_WIDTH
+    if (d.y + h > maxY) maxY = d.y + h
+  }
+  const MARGIN = 40
+  const W = maxX + MARGIN
+  const H = maxY + MARGIN
+
+  const parts = []
+  // Background (matches canvas --bg-0).
+  parts.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">')
+  parts.push('<rect width="' + W + '" height="' + H + '" fill="#0a0e14"/>')
+
+  // Connections first (so device rectangles draw on top of curve endpoints).
+  connections.forEach((conn, i) => {
+    const fromDev = devices.find(d => d.id === conn.fromDeviceId)
+    const toDev = devices.find(d => d.id === conn.toDeviceId)
+    if (!fromDev || !toDev) return
+    const fromPos = getPortPos(fromDev, conn.fromPortIndex, 'out')
+    const toPos = getPortPos(toDev, conn.toPortIndex, 'in')
+    const path = getConnPath(fromPos.x, fromPos.y, toPos.x, toPos.y)
+    const color = COLORS[conn.signalType] || COLORS.video
+    parts.push('<path d="' + path + '" fill="none" stroke="' + color + '" stroke-width="2"/>')
+    // Wire number at midpoint, matching WiringPlanTab ordering.
+    const num = String(i + 1).padStart(2, '0')
+    const midX = (fromPos.x + toPos.x) / 2
+    const midY = (fromPos.y + toPos.y) / 2
+    parts.push('<circle cx="' + midX + '" cy="' + midY + '" r="11" fill="#0a0e14" stroke="' + color + '" stroke-width="1.5"/>')
+    parts.push('<text x="' + midX + '" y="' + (midY + 4) + '" fill="' + color + '" font-family="monospace" font-size="11" font-weight="bold" text-anchor="middle">' + num + '</text>')
+  })
+
+  // Devices.
+  for (const d of devices) {
+    const type = getDeviceType(d.id)
+    if (!type) continue
+    const h = getDeviceHeight(d)
+    const accent = CAT_COLORS[type.category] || '#8893a7'
+    // Device body.
+    parts.push('<rect x="' + d.x + '" y="' + d.y + '" width="' + DEVICE_WIDTH + '" height="' + h + '" rx="6" fill="#141b26" stroke="#2e3a4f" stroke-width="1"/>')
+    // Accent bar.
+    parts.push('<rect x="' + d.x + '" y="' + d.y + '" width="3" height="' + h + '" fill="' + accent + '"/>')
+    // Device name.
+    parts.push('<text x="' + (d.x + 14) + '" y="' + (d.y + 23) + '" fill="#dde4f0" font-family="sans-serif" font-size="13" font-weight="600">' + escapeXML(d.name) + '</text>')
+
+    // Ports: in on left edge, out on right edge.
+    const maxPorts = Math.max(type.inputs.length, type.outputs.length)
+    for (let i = 0; i < maxPorts; i++) {
+      const inPort = type.inputs[i]
+      const outPort = type.outputs[i]
+      const y = d.y + HEADER_HEIGHT + PORT_PADDING + i * PORT_ROW + PORT_ROW / 2
+      if (inPort) {
+        const c = COLORS[inPort.signal] || COLORS.video
+        parts.push('<circle cx="' + d.x + '" cy="' + y + '" r="4" fill="' + c + '"/>')
+        parts.push('<text x="' + (d.x + 10) + '" y="' + (y + 3) + '" fill="#8893a7" font-family="monospace" font-size="9">' + escapeXML(inPort.label) + '</text>')
+      }
+      if (outPort) {
+        const c = COLORS[outPort.signal] || COLORS.video
+        parts.push('<circle cx="' + (d.x + DEVICE_WIDTH) + '" cy="' + y + '" r="4" fill="' + c + '"/>')
+        parts.push('<text x="' + (d.x + DEVICE_WIDTH - 10) + '" y="' + (y + 3) + '" fill="#8893a7" font-family="monospace" font-size="9" text-anchor="end">' + escapeXML(outPort.label) + '</text>')
+      }
+    }
+  }
+
+  parts.push('</svg>')
+  return parts.join('')
+}
+
+function escapeXML(s) {
+  return String(s).replace(/[<>&"']/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[ch]))
 }

@@ -4,7 +4,7 @@ import {
   INITIAL_DEVICES, INITIAL_CONNECTIONS, INITIAL_REQUIREMENTS,
 } from './constants.js'
 import { Icons } from './icons.jsx'
-import { uid, initUidCounter, getPortPos, getConnPath, validateRequirements, isOccupied, getDeviceHeight, rectIntersect } from './utils.js'
+import { uid, initUidCounter, getPortPos, getConnPath, validateRequirements, isOccupied, getDeviceHeight, rectIntersect, buildTopologySVG } from './utils.js'
 
 const STORAGE_KEY = 'signal-route-planner-v1'
 
@@ -89,7 +89,7 @@ export function validateProjectArchive(archive) {
 }
 
 /* ============ PROJECT SELECTOR ============ */
-function ProjectSelector({ projects, activeProjectId, onSelect, onRename, onDuplicate, onDelete, onCreate, onExport, onImport }) {
+function ProjectSelector({ projects, activeProjectId, onSelect, onRename, onDuplicate, onDelete, onCreate, onExport, onImport, onExportTopology }) {
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [editValue, setEditValue] = useState('')
@@ -192,6 +192,7 @@ function ProjectSelector({ projects, activeProjectId, onSelect, onRename, onDupl
               <button className="btn" onClick={() => { onCreate(); closeDropdown() }}>新建项目</button>
               <button className="btn" onClick={() => { onDuplicate(); closeDropdown() }}>复制当前项目</button>
               <button className="btn" onClick={() => { onExport(); closeDropdown() }} disabled={projects.length === 0}>导出归档</button>
+              <button className="btn" onClick={() => { onExportTopology(); closeDropdown() }} disabled={projects.length === 0}>导出拓扑图</button>
               <button className="btn" onClick={() => fileInputRef.current && fileInputRef.current.click()}>导入归档</button>
               <input
                 ref={fileInputRef}
@@ -494,7 +495,7 @@ function RequirementsTab({ devices, connections, requirements, onAdd, onDelete }
 }
 
 /* ============ WIRING PLAN TAB ============ */
-function WiringPlanTab({ connections, devices, onExport }) {
+function WiringPlanTab({ connections, devices, onExport, onExportTopology }) {
   const lines = connections.map((conn, i) => {
     const fromDev = devices.find(d => d.id === conn.fromDeviceId)
     const toDev = devices.find(d => d.id === conn.toDeviceId)
@@ -516,7 +517,10 @@ function WiringPlanTab({ connections, devices, onExport }) {
           <div className="wiring-title">接线方案</div>
           <div className="wiring-count">共 {connections.length} 根连线</div>
         </div>
-        <button className="btn btn-primary" onClick={onExport} disabled={connections.length === 0}>复制方案</button>
+        <div className="wiring-actions">
+          <button className="btn" onClick={onExportTopology} disabled={connections.length === 0}>导出拓扑图</button>
+          <button className="btn btn-primary" onClick={onExport} disabled={connections.length === 0}>复制方案</button>
+        </div>
       </div>
       <div className="wiring-section-title">连线清单</div>
       <pre className="wiring-list">{lines.join('\n') || '暂无连线'}</pre>
@@ -1000,6 +1004,52 @@ export default function App() {
     reader.readAsText(file)
   }
 
+  /* ----- TOPOLOGY EXPORT (ADR-0006) ----- */
+  function handleExportTopology() {
+    if (devices.length === 0) {
+      showToast('画布无设备，无法导出拓扑图')
+      return
+    }
+    const getDeviceType = (deviceId) => {
+      const dev = devices.find(d => d.id === deviceId)
+      return dev ? DEVICE_TYPES[dev.typeId] : undefined
+    }
+    const svg = buildTopologySVG(devices, connections, getDeviceType)
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.onload = () => {
+      // Render SVG onto canvas at 2x for crisp output.
+      const scale = 2
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth * scale
+      canvas.height = img.naturalHeight * scale
+      const ctx = canvas.getContext('2d')
+      ctx.scale(scale, scale)
+      ctx.drawImage(img, 0, 0)
+      URL.revokeObjectURL(url)
+      canvas.toBlob((pngBlob) => {
+        if (!pngBlob) { showToast('拓扑图导出失败'); return }
+        const pngUrl = URL.createObjectURL(pngBlob)
+        const a = document.createElement('a')
+        const date = new Date().toISOString().slice(0, 10)
+        const safeName = currentProject.name.replace(/[\\/:*?"<>|]/g, '_')
+        a.href = pngUrl
+        a.download = '拓扑图_' + safeName + '_' + date + '.png'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(pngUrl)
+        showToast('已导出拓扑图', 'info')
+      }, 'image/png')
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      showToast('拓扑图导出失败：SVG 渲染错误')
+    }
+    img.src = url
+  }
+
   return (
     <div className="app">
       <div className="toolbar">
@@ -1015,6 +1065,7 @@ export default function App() {
             onCreate={handleCreateProject}
             onExport={handleExportProject}
             onImport={handleImportProject}
+            onExportTopology={handleExportTopology}
           />
         </div>
         <div className="toolbar-stats">
@@ -1093,6 +1144,7 @@ export default function App() {
               connections={connections}
               devices={devices}
               onExport={handleExport}
+              onExportTopology={handleExportTopology}
             />
           )}
         </div>

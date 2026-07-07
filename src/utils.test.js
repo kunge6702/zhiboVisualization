@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findRoute, validateRequirements } from './utils.js'
+import { findRoute, validateRequirements, buildTopologySVG } from './utils.js'
 import { DEVICE_TYPES } from './constants.js'
 
 // Build a getDeviceType callback from a devices array (same shape as project devices).
@@ -168,5 +168,34 @@ describe('validateRequirements — switcher OUT exhaustion', () => {
     const r4 = results.find(r => r.requirementId === 'r4')
     expect(r4.status).toBe('conflict')
     expect(r4.conflictWith).toBeTruthy() // points to whichever prior requirement consumed the blocking port
+  })
+})
+
+describe('buildTopologySVG', () => {
+  it('renders device names, wire numbers, and sizes to fit', () => {
+    const devices = [
+      { id: 'cam', typeId: 'camera_sony', name: '摄像机A', x: 60, y: 80 },
+      { id: 'sw', typeId: 'switcher', name: '切换台', x: 360, y: 130 },
+    ]
+    const connections = [
+      { id: 'c1', fromDeviceId: 'cam', fromPortIndex: 0, toDeviceId: 'sw', toPortIndex: 0, signalType: 'video' },
+      { id: 'c2', fromDeviceId: 'sw', fromPortIndex: 0, toDeviceId: 'cam', toPortIndex: 0, signalType: 'video' },
+    ]
+    const svg = buildTopologySVG(devices, connections, typeResolver(devices))
+    // SVG wrapper with xmlns.
+    expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"')
+    // Device names present.
+    expect(svg).toContain('摄像机A')
+    expect(svg).toContain('切换台')
+    // Wire numbers 01 and 02 present (match WiringPlanTab ordering).
+    expect(svg).toContain('>01<')
+    expect(svg).toContain('>02<')
+    // Sized beyond device bounds (switcher at x=360, width 200 -> 560, plus margin).
+    expect(svg).toMatch(/width="6\d\d"/)
+  })
+
+  it('returns a placeholder SVG when there are no devices', () => {
+    const svg = buildTopologySVG([], [], typeResolver([]))
+    expect(svg).toContain('暂无设备')
   })
 })
