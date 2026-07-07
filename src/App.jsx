@@ -4,7 +4,7 @@ import {
   INITIAL_DEVICES, INITIAL_CONNECTIONS, INITIAL_REQUIREMENTS,
 } from './constants.js'
 import { Icons } from './icons.jsx'
-import { uid, initUidCounter, getPortPos, getConnPath, findRoute, isOccupied, getDeviceHeight, rectIntersect } from './utils.js'
+import { uid, initUidCounter, getPortPos, getConnPath, validateRequirements, isOccupied, getDeviceHeight, rectIntersect } from './utils.js'
 
 const STORAGE_KEY = 'signal-route-planner-v1'
 
@@ -332,12 +332,18 @@ function RequirementsTab({ devices, connections, requirements, onAdd, onDelete }
   const [dstId, setDstId] = useState('')
   const [sigType, setSigType] = useState('video')
 
+  const getDeviceType = (deviceId) => {
+    const dev = devices.find(d => d.id === deviceId)
+    return dev ? DEVICE_TYPES[dev.typeId] : undefined
+  }
+
   const validation = useMemo(() => {
+    const results = validateRequirements(requirements, connections, getDeviceType)
     return requirements.map(req => {
-      const route = findRoute(connections, req.sourceDeviceId, req.destDeviceId, req.signalType)
-      return { ...req, satisfied: !!route, route: route || null }
+      const result = results.find(r => r.requirementId === req.id) || { status: 'broken', route: null, conflictWith: null }
+      return { ...req, ...result }
     })
-  }, [requirements, connections])
+  }, [requirements, connections, devices])
 
   function handleAdd() {
     if (!srcId || !dstId || srcId === dstId) return
@@ -350,14 +356,14 @@ function RequirementsTab({ devices, connections, requirements, onAdd, onDelete }
     <div>
       <div className="req-form">
         <div className="form-row">
-          <label>信号源设备</label>
+          <label>起始设备</label>
           <select value={srcId} onChange={e => setSrcId(e.target.value)}>
             <option value="">选择设备...</option>
             {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </div>
         <div className="form-row">
-          <label>终点设备</label>
+          <label>目标设备</label>
           <select value={dstId} onChange={e => setDstId(e.target.value)}>
             <option value="">选择设备...</option>
             {devices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -381,14 +387,21 @@ function RequirementsTab({ devices, connections, requirements, onAdd, onDelete }
           const srcDev = devices.find(d => d.id === req.sourceDeviceId)
           const dstDev = devices.find(d => d.id === req.destDeviceId)
           if (!srcDev || !dstDev) return null
-          const routeNames = req.route ? req.route.map(id => {
-            const d = devices.find(dd => dd.id === id)
+          // Port-level route -> device name chain (dedupe consecutive same-device entries).
+          const routeNames = req.route ? req.route.map(p => {
+            const d = devices.find(dd => dd.id === p.deviceId)
             return d ? d.name : '?'
-          }).join(' -> ') : null
+          }).filter((name, i, arr) => i === 0 || name !== arr[i - 1]).join(' -> ') : null
+          const status = req.status || 'broken'
+          // For conflict, find the blocker requirement's label for the message.
+          const blockerReq = req.conflictWith ? requirements.find(r => r.id === req.conflictWith) : null
+          const blockerLabel = blockerReq
+            ? (devices.find(d => d.id === blockerReq.sourceDeviceId)?.name || '?') + ' -> ' + (devices.find(d => d.id === blockerReq.destDeviceId)?.name || '?')
+            : null
           return (
-            <div key={req.id} className={'req-item ' + (req.satisfied ? 'ok' : 'fail')}>
+            <div key={req.id} className={'req-item ' + status}>
               <div className="req-header">
-                <span className={'req-status ' + (req.satisfied ? 'ok' : 'fail')} />
+                <span className={'req-status ' + status} />
                 <span className="req-desc">
                   {srcDev.name} -&gt; {dstDev.name}
                   <span className={'req-type ' + req.signalType}>{req.signalType === 'video' ? '视频' : '音频'}</span>
@@ -399,10 +412,14 @@ function RequirementsTab({ devices, connections, requirements, onAdd, onDelete }
                   </svg>
                 </button>
               </div>
-              {req.satisfied ? (
+              {status === 'ok' && routeNames && (
                 <div className="req-route">{routeNames}</div>
-              ) : (
+              )}
+              {status === 'broken' && (
                 <div className="req-broken">未找到完整路由</div>
+              )}
+              {status === 'conflict' && (
+                <div className="req-conflict">端口冲突：与 [{blockerLabel || req.conflictWith}] 争抢端口</div>
               )}
             </div>
           )
