@@ -48,6 +48,12 @@ export const DEVICE_TYPES = {
     inputs: [],
     outputs: [{ label: 'HDMI OUT', signal: 'video' }],
   },
+  microphone: {
+    label: '麦克风', category: 'source',
+    icon: 'microphone',
+    inputs: [],
+    outputs: [{ label: 'XLR OUT', signal: 'audio' }],
+  },
   switcher: {
     label: '切换台', category: 'switcher',
     inputs: [
@@ -110,6 +116,7 @@ export const INITIAL_DEVICES = [
   { id: 'd6', typeId: 'laptop', name: '笔记本 1', x: 940, y: 140 },
   { id: 'd7', typeId: 'audio_mixer', name: '调音台 1', x: 360, y: 420 },
   { id: 'd8', typeId: 'sound_card', name: '声卡 1', x: 660, y: 440 },
+  { id: 'd9', typeId: 'microphone', name: '麦克风 1', x: 60, y: 440 },
 ]
 
 export const INITIAL_CONNECTIONS = [
@@ -119,8 +126,9 @@ export const INITIAL_CONNECTIONS = [
   { id: 'c4', fromDeviceId: 'd3', fromPortIndex: 1, toDeviceId: 'd4', toPortIndex: 0, signalType: 'video' },
   { id: 'c5', fromDeviceId: 'd5', fromPortIndex: 0, toDeviceId: 'd6', toPortIndex: 0, signalType: 'video' },
   { id: 'c6', fromDeviceId: 'd6', fromPortIndex: 0, toDeviceId: 'd3', toPortIndex: 2, signalType: 'video' },
-  { id: 'c7', fromDeviceId: 'd7', fromPortIndex: 0, toDeviceId: 'd8', toPortIndex: 0, signalType: 'audio' },
-  { id: 'c8', fromDeviceId: 'd8', fromPortIndex: 0, toDeviceId: 'd6', toPortIndex: 2, signalType: 'audio' },
+  { id: 'c7', fromDeviceId: 'd9', fromPortIndex: 0, toDeviceId: 'd7', toPortIndex: 0, signalType: 'audio' },
+  { id: 'c8', fromDeviceId: 'd7', fromPortIndex: 0, toDeviceId: 'd8', toPortIndex: 0, signalType: 'audio' },
+  { id: 'c9', fromDeviceId: 'd8', fromPortIndex: 0, toDeviceId: 'd6', toPortIndex: 2, signalType: 'audio' },
 ]
 
 export const INITIAL_REQUIREMENTS = [
@@ -128,5 +136,5 @@ export const INITIAL_REQUIREMENTS = [
   { id: 'r2', sourceDeviceId: 'd2', destDeviceId: 'd6', signalType: 'video' },
   { id: 'r3', sourceDeviceId: 'd3', destDeviceId: 'd4', signalType: 'video' },
   { id: 'r4', sourceDeviceId: 'd6', destDeviceId: 'd3', signalType: 'video' },
-  { id: 'r5', sourceDeviceId: 'd7', destDeviceId: 'd6', signalType: 'audio' },
+  { id: 'r5', sourceDeviceId: 'd9', destDeviceId: 'd6', signalType: 'audio' },
 ]

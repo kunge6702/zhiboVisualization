@@ -223,7 +223,7 @@ function DeviceNode({ device, type, connections, connectingFrom, selected, onPor
     <div className={'device-node' + (selected ? ' selected' : '')} style={{ left: device.x, top: device.y }}>
       <div className="device-accent" style={{ background: accentColor }} />
       <div className="device-header" onMouseDown={(e) => onDragStart(e, device)}>
-        <div className="device-icon" style={{ color: accentColor }}>{Icons[type.category]}</div>
+        <div className="device-icon" style={{ color: accentColor }}>{Icons[type.icon] || Icons[type.category]}</div>
         {editing ? (
           <input
             ref={nameInputRef}
@@ -312,7 +312,7 @@ function DeviceLibrary({ onAdd, deviceCounts }) {
           <div className="lib-cat-title">{CAT_LABELS[catKey]}</div>
           {catItems.map(item => (
             <div className="lib-item" key={item.typeId} onClick={() => onAdd(item.typeId)}>
-              <div className="lib-icon" style={{ color: CAT_COLORS[item.category] }}>{Icons[item.category]}</div>
+              <div className="lib-icon" style={{ color: CAT_COLORS[item.category] }}>{Icons[item.icon] || Icons[item.category]}</div>
               <div className="lib-info">
                 <div className="lib-name">{item.label}</div>
                 <div className="lib-ports">{item.inputs.length} in / {item.outputs.length} out</div>
