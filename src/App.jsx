@@ -9,14 +9,32 @@ import { uid, initUidCounter, getPortPos, getConnPath, validateRequirements, isO
 const STORAGE_KEY = 'signal-route-planner-v1'
 
 /* ============ STORAGE HELPERS ============ */
+let _loadWasCorrupt = false
 function loadProjects() {
+  const raw = localStorage.getItem(STORAGE_KEY)
+  if (raw === null) {
+    // First use: no data stored yet. Seed demo project silently.
+    const defaultProject = [{
+      id: uid('p'),
+      name: '示例项目',
+      devices: INITIAL_DEVICES.map(d => ({ ...d })),
+      connections: INITIAL_CONNECTIONS.map(c => ({ ...c })),
+      requirements: INITIAL_REQUIREMENTS.map(r => ({ ...r })),
+    }]
+    initUidCounter(defaultProject)
+    return defaultProject
+  }
   try {
-    const data = JSON.parse(localStorage.getItem(STORAGE_KEY))
+    const data = JSON.parse(raw)
     if (data && data.projects && data.projects.length > 0) {
       initUidCounter(data.projects)
       return data.projects
     }
-  } catch (e) {}
+    // Stored but empty/invalid shape — treat as corrupt.
+    _loadWasCorrupt = true
+  } catch (e) {
+    _loadWasCorrupt = true
+  }
   const defaultProject = [{
     id: uid('p'),
     name: '示例项目',
@@ -39,13 +57,45 @@ function loadActiveProjectId() {
   return null
 }
 
+/* ============ PROJECT ARCHIVE VALIDATION ============ */
+// Validates an imported JSON archive. Returns { ok: true } or { ok: false, reason }.
+// Checks: archive shape, version, project sub-object, and that every device typeId exists in DEVICE_TYPES.
+// Also verifies connection/requirement referential integrity against the imported device set.
+export function validateProjectArchive(archive) {
+  if (!archive || typeof archive !== 'object') return { ok: false, reason: '文件不是有效的 JSON 对象' }
+  if (archive.kind !== 'signal-route-planner-project') return { ok: false, reason: '不是信号路由规划项目归档（kind 不匹配）' }
+  if (archive.version !== 1) return { ok: false, reason: '不支持的归档版本：' + archive.version }
+  const proj = archive.project
+  if (!proj || typeof proj !== 'object') return { ok: false, reason: '归档缺少 project 字段' }
+  if (typeof proj.name !== 'string') return { ok: false, reason: '项目缺少名称' }
+  if (!Array.isArray(proj.devices)) return { ok: false, reason: '设备清单缺失或非数组' }
+  if (!Array.isArray(proj.connections)) return { ok: false, reason: '连线清单缺失或非数组' }
+  if (!Array.isArray(proj.requirements)) return { ok: false, reason: '需求清单缺失或非数组' }
+  // Every device must reference a known typeId.
+  for (const d of proj.devices) {
+    if (!DEVICE_TYPES[d.typeId]) return { ok: false, reason: '未知设备类型：' + d.typeId }
+  }
+  // Referential integrity: connections reference imported device ids.
+  const deviceIds = new Set(proj.devices.map(d => d.id))
+  for (const c of proj.connections) {
+    if (!deviceIds.has(c.fromDeviceId)) return { ok: false, reason: '连线引用了不存在的设备：' + c.fromDeviceId }
+    if (!deviceIds.has(c.toDeviceId)) return { ok: false, reason: '连线引用了不存在的设备：' + c.toDeviceId }
+  }
+  for (const r of proj.requirements) {
+    if (!deviceIds.has(r.sourceDeviceId)) return { ok: false, reason: '需求引用了不存在的设备：' + r.sourceDeviceId }
+    if (!deviceIds.has(r.destDeviceId)) return { ok: false, reason: '需求引用了不存在的设备：' + r.destDeviceId }
+  }
+  return { ok: true }
+}
+
 /* ============ PROJECT SELECTOR ============ */
-function ProjectSelector({ projects, activeProjectId, onSelect, onRename, onDuplicate, onDelete, onCreate }) {
+function ProjectSelector({ projects, activeProjectId, onSelect, onRename, onDuplicate, onDelete, onCreate, onExport, onImport }) {
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [editValue, setEditValue] = useState('')
   const [deletingId, setDeletingId] = useState(null)
   const inputRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   const current = projects.find(p => p.id === activeProjectId) || projects[0]
 
@@ -141,6 +191,20 @@ function ProjectSelector({ projects, activeProjectId, onSelect, onRename, onDupl
             <div className="project-dropdown-actions">
               <button className="btn" onClick={() => { onCreate(); closeDropdown() }}>新建项目</button>
               <button className="btn" onClick={() => { onDuplicate(); closeDropdown() }}>复制当前项目</button>
+              <button className="btn" onClick={() => { onExport(); closeDropdown() }} disabled={projects.length === 0}>导出归档</button>
+              <button className="btn" onClick={() => fileInputRef.current && fileInputRef.current.click()}>导入归档</button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files && e.target.files[0]
+                  if (file) onImport(file)
+                  e.target.value = ''
+                  closeDropdown()
+                }}
+              />
             </div>
           </div>
         </>
@@ -485,8 +549,18 @@ export default function App() {
     try {
       const activeId = activeProjectId || (projects[0] && projects[0].id)
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects, activeProjectId: activeId }))
-    } catch (e) {}
+    } catch (e) {
+      // Quota exceeded or storage unavailable — surface to user, don't silently lose.
+      showToast('保存失败，建议立即导出项目归档')
+    }
   }, [projects, activeProjectId])
+
+  // One-time: warn if local data was corrupt on load (ADR-0005 — informed failure).
+  useEffect(() => {
+    if (_loadWasCorrupt) {
+      showToast('检测到本地数据损坏，已加载示例项目。原有数据无法恢复，请从导出的归档恢复')
+    }
+  }, [])
 
   // Sync activeProjectId if null or stale (e.g. first load)
   useEffect(() => {
@@ -835,6 +909,97 @@ export default function App() {
     }
   }
 
+  /* ----- PROJECT ARCHIVE (export / import) — ADR-0005 ----- */
+  function handleExportProject() {
+    // Human-readable JSON of the current project's full state.
+    const archive = {
+      kind: 'signal-route-planner-project',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      project: {
+        name: currentProject.name,
+        devices: currentProject.devices,
+        connections: currentProject.connections,
+        requirements: currentProject.requirements,
+      },
+    }
+    const json = JSON.stringify(archive, null, 2)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const date = new Date().toISOString().slice(0, 10)
+    const safeName = currentProject.name.replace(/[\\/:*?"<>|]/g, '_')
+    a.href = url
+    a.download = safeName + '_' + date + '.json'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    showToast('已导出项目归档', 'info')
+  }
+
+  function handleImportProject(file) {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      let archive
+      try {
+        archive = JSON.parse(e.target.result)
+      } catch (err) {
+        showToast('导入失败：JSON 格式错误')
+        return
+      }
+      const validation = validateProjectArchive(archive)
+      if (!validation.ok) {
+        showToast('导入失败：' + validation.reason)
+        return
+      }
+      // Import as a new project with fresh ids to avoid collisions with existing projects.
+      const imported = archive.project
+      const idMap = {}
+      const remapDevices = imported.devices.map(d => {
+        const newId = uid('d')
+        idMap[d.id] = newId
+        return { ...d, id: newId }
+      })
+      const remapConnections = imported.connections.map(c => ({
+        ...c,
+        id: uid('c'),
+        fromDeviceId: idMap[c.fromDeviceId] || c.fromDeviceId,
+        toDeviceId: idMap[c.toDeviceId] || c.toDeviceId,
+      }))
+      const remapRequirements = imported.requirements.map(r => ({
+        ...r,
+        id: uid('r'),
+        sourceDeviceId: idMap[r.sourceDeviceId] || r.sourceDeviceId,
+        destDeviceId: idMap[r.destDeviceId] || r.destDeviceId,
+      }))
+      const baseName = imported.name + ' (导入)'
+      let finalName = baseName
+      let counter = 2
+      while (projects.some(p => p.name === finalName)) {
+        finalName = baseName + ' ' + counter
+        counter++
+      }
+      const newProject = {
+        id: uid('p'),
+        name: finalName,
+        devices: remapDevices,
+        connections: remapConnections,
+        requirements: remapRequirements,
+      }
+      setProjects([...projects, newProject])
+      setActiveProjectId(newProject.id)
+      setConnectingFrom(null)
+      setSelectedConn(null)
+      setSelectedDevices(new Set())
+      setDragging(null)
+      setSelBox(null)
+      showToast('已导入项目：' + finalName, 'info')
+    }
+    reader.onerror = () => showToast('导入失败：无法读取文件')
+    reader.readAsText(file)
+  }
+
   return (
     <div className="app">
       <div className="toolbar">
@@ -848,6 +1013,8 @@ export default function App() {
             onDuplicate={handleDuplicateProject}
             onDelete={handleDeleteProject}
             onCreate={handleCreateProject}
+            onExport={handleExportProject}
+            onImport={handleImportProject}
           />
         </div>
         <div className="toolbar-stats">
