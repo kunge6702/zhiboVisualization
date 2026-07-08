@@ -592,7 +592,7 @@ select:focus{border-color:var(--gold)}
 /* ============ ZOOM CONTROLS ============ */
 .zoom-controls{
   position:absolute;
-  bottom:16px;left:16px;
+  bottom:16px;right:16px;
   display:flex;
   align-items:center;
   gap:4px;
@@ -602,6 +602,13 @@ select:focus{border-color:var(--gold)}
   padding:4px;
   z-index:50;
   box-shadow:0 4px 16px rgba(0,0,0,.4);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .15s ease-out;
+}
+.zoom-controls.visible{
+  opacity:1;
+  pointer-events:auto;
 }
 .zoom-btn{
   width:28px;height:28px;

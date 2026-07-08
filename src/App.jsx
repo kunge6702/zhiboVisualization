@@ -508,6 +508,7 @@ export default function App() {
   const [selectedDevices, setSelectedDevices] = useState(new Set())
   const [selBox, setSelBox] = useState(null)
   const [panning, setPanning] = useState(null) // { startClientX, startClientY, scrollLeft, scrollTop }
+  const [canvasHovered, setCanvasHovered] = useState(false)
   const [activeTab, setActiveTab] = useState('requirements')
   const [toast, setToast] = useState(null)
   const [histories, setHistories] = useState(new Map()) // projectId -> { past: [], future: [] }
@@ -1200,7 +1201,7 @@ export default function App() {
 
       <DeviceLibrary onAdd={handleAddDevice} deviceCounts={deviceCounts} />
 
-      <div className="canvas-container" ref={canvasContainerRef} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>
+      <div className="canvas-container" ref={canvasContainerRef} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseEnter={() => setCanvasHovered(true)} onMouseLeave={() => setCanvasHovered(false)}>
         <div className="canvas" ref={canvasRef} onMouseDown={handleCanvasMouseDown} onClick={handleCanvasClick} onContextMenu={handleContextMenu} style={{ transform: 'scale(' + zoom + ')', transformOrigin: '0 0', cursor: panning ? 'grabbing' : 'default' }}>
           <ConnectionLayer
             connections={connections}
@@ -1239,15 +1240,15 @@ export default function App() {
               <p>点击左侧设备库添加设备到画布</p>
             </div>
           )}
-          <div className="zoom-controls" style={{ transform: 'scale(' + (1 / zoom) + ')', transformOrigin: 'bottom left' }}>
-            <button className="zoom-btn" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} title="缩小 (Ctrl+滚轮)">−</button>
-            <button className="zoom-level" onClick={zoomReset} title="重置缩放">{Math.round(zoom * 100)}%</button>
-            <button className="zoom-btn" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} title="放大 (Ctrl+滚轮)">+</button>
-          </div>
         </div>
         {toast && (
           <div className={toast.type === 'info' ? 'info-toast' : 'error-toast'}>{toast.msg}</div>
         )}
+        <div className={'zoom-controls' + (canvasHovered ? ' visible' : '')}>
+          <button className="zoom-btn" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} title="缩小 (Ctrl+滚轮)">−</button>
+          <button className="zoom-level" onClick={zoomReset} title="重置缩放">{Math.round(zoom * 100)}%</button>
+          <button className="zoom-btn" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} title="放大 (Ctrl+滚轮)">+</button>
+        </div>
       </div>
 
       <div className="side-panel">
