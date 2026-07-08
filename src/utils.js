@@ -283,6 +283,28 @@ function escapeXML(s) {
 }
 
 /**
+ * Sanitize a project: drop devices whose typeId no longer exists in DEVICE_TYPES,
+ * cascading the removal to their connections and requirements.
+ * Returns { project, dropped } where `dropped` is the count of removed devices.
+ * Does not mutate the input.
+ */
+export function sanitizeProject(project) {
+  const validDevices = project.devices.filter(d => DEVICE_TYPES[d.typeId])
+  const dropped = project.devices.length - validDevices.length
+  if (dropped === 0) return { project, dropped: 0 }
+  const validIds = new Set(validDevices.map(d => d.id))
+  return {
+    project: {
+      ...project,
+      devices: validDevices,
+      connections: project.connections.filter(c => validIds.has(c.fromDeviceId) && validIds.has(c.toDeviceId)),
+      requirements: project.requirements.filter(r => validIds.has(r.sourceDeviceId) && validIds.has(r.destDeviceId)),
+    },
+    dropped,
+  }
+}
+
+/**
  * Validate an imported project archive (ADR-0005).
  * Pure function - no JSX dependency, lives here so it can be unit-tested.
  *

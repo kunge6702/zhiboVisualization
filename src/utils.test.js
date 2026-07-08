@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findRoute, validateRequirements, buildTopologySVG, validateProjectArchive } from './utils.js'
+import { findRoute, validateRequirements, buildTopologySVG, validateProjectArchive, sanitizeProject } from './utils.js'
 import { DEVICE_TYPES } from './constants.js'
 
 // Build a getDeviceType callback from a devices array (same shape as project devices).
@@ -286,5 +286,64 @@ describe('validateProjectArchive', () => {
     const r = validateProjectArchive(a)
     expect(r.ok).toBe(false)
     expect(r.reason).toContain('设备清单')
+  })
+})
+
+describe('sanitizeProject', () => {
+  function makeProject() {
+    return {
+      id: 'p1', name: '测试',
+      devices: [
+        { id: 'd1', typeId: 'camera_sony', name: '摄像机', x: 0, y: 0 },
+        { id: 'd2', typeId: 'large_screen', name: '大屏', x: 200, y: 0 },
+        { id: 'd3', typeId: 'ghost_type', name: '幽灵设备', x: 400, y: 0 },
+      ],
+      connections: [
+        { id: 'c1', fromDeviceId: 'd1', fromPortIndex: 0, toDeviceId: 'd2', toPortIndex: 0, signalType: 'video' },
+        { id: 'c2', fromDeviceId: 'd1', fromPortIndex: 0, toDeviceId: 'd3', toPortIndex: 0, signalType: 'video' },
+      ],
+      requirements: [
+        { id: 'r1', sourceDeviceId: 'd1', destDeviceId: 'd2', signalType: 'video' },
+        { id: 'r2', sourceDeviceId: 'd1', destDeviceId: 'd3', signalType: 'video' },
+      ],
+    }
+  }
+
+  it('leaves a clean project unchanged (dropped=0)', () => {
+    const proj = makeProject()
+    proj.devices = proj.devices.slice(0, 2) // drop the ghost
+    proj.connections = proj.connections.slice(0, 1)
+    proj.requirements = proj.requirements.slice(0, 1)
+    const { project, dropped } = sanitizeProject(proj)
+    expect(dropped).toBe(0)
+    expect(project.devices.length).toBe(2)
+    expect(project).toEqual(proj)
+  })
+
+  it('drops devices with invalid typeId and cascades to connections/requirements', () => {
+    const { project, dropped } = sanitizeProject(makeProject())
+    expect(dropped).toBe(1)
+    // Ghost device d3 removed.
+    expect(project.devices.map(d => d.id)).toEqual(['d1', 'd2'])
+    // Connection c2 (referencing d3) removed; c1 kept.
+    expect(project.connections.map(c => c.id)).toEqual(['c1'])
+    // Requirement r2 (referencing d3) removed; r1 kept.
+    expect(project.requirements.map(r => r.id)).toEqual(['r1'])
+  })
+
+  it('does not mutate the input project', () => {
+    const proj = makeProject()
+    const originalDeviceCount = proj.devices.length
+    sanitizeProject(proj)
+    expect(proj.devices.length).toBe(originalDeviceCount)
+    expect(proj.devices[2].typeId).toBe('ghost_type')
+  })
+
+  it('handles multiple invalid devices', () => {
+    const proj = makeProject()
+    proj.devices.push({ id: 'd4', typeId: 'another_ghost', name: '幽灵2', x: 0, y: 0 })
+    const { project, dropped } = sanitizeProject(proj)
+    expect(dropped).toBe(2)
+    expect(project.devices.map(d => d.id)).toEqual(['d1', 'd2'])
   })
 })

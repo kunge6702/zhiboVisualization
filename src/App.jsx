@@ -4,12 +4,13 @@ import {
   INITIAL_DEVICES, INITIAL_CONNECTIONS, INITIAL_REQUIREMENTS,
 } from './constants.js'
 import { Icons } from './icons.jsx'
-import { uid, initUidCounter, getPortPos, getConnPath, validateRequirements, validateProjectArchive, isOccupied, getDeviceHeight, rectIntersect, buildTopologySVG } from './utils.js'
+import { uid, initUidCounter, getPortPos, getConnPath, validateRequirements, validateProjectArchive, sanitizeProject, isOccupied, getDeviceHeight, rectIntersect, buildTopologySVG } from './utils.js'
 
 const STORAGE_KEY = 'signal-route-planner-v1'
 
 /* ============ STORAGE HELPERS ============ */
 let _loadWasCorrupt = false
+let _loadDroppedDevices = 0
 function loadProjects() {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (raw === null) {
@@ -27,10 +28,16 @@ function loadProjects() {
   try {
     const data = JSON.parse(raw)
     if (data && data.projects && data.projects.length > 0) {
-      initUidCounter(data.projects)
-      return data.projects
+      // Sanitize: drop devices whose typeId no longer exists (e.g. after device-library changes).
+      const sanitized = data.projects.map(p => {
+        const { project, dropped } = sanitizeProject(p)
+        _loadDroppedDevices += dropped
+        return project
+      })
+      initUidCounter(sanitized)
+      return sanitized
     }
-    // Stored but empty/invalid shape — treat as corrupt.
+    // Stored but empty/invalid shape - treat as corrupt.
     _loadWasCorrupt = true
   } catch (e) {
     _loadWasCorrupt = true
@@ -190,6 +197,8 @@ function DeviceNode({ device, type, connections, connectingFrom, selected, onPor
   const nameInputRef = useRef(null)
   const cancelledRef = useRef(false)
 
+  // Defensive: if typeId is invalid (shouldn't happen after sanitize, but guard against white screen).
+  if (!type) return null
   const accentColor = CAT_COLORS[type.category]
   const maxPorts = Math.max(type.inputs.length, type.outputs.length)
 
@@ -469,8 +478,11 @@ function WiringPlanTab({ connections, devices, onExport, onExportTopology }) {
     const fromDev = devices.find(d => d.id === conn.fromDeviceId)
     const toDev = devices.find(d => d.id === conn.toDeviceId)
     if (!fromDev || !toDev) return null
-    const fromPort = DEVICE_TYPES[fromDev.typeId].outputs[conn.fromPortIndex]
-    const toPort = DEVICE_TYPES[toDev.typeId].inputs[conn.toPortIndex]
+    const fromType = DEVICE_TYPES[fromDev.typeId]
+    const toType = DEVICE_TYPES[toDev.typeId]
+    if (!fromType || !toType) return null
+    const fromPort = fromType.outputs[conn.fromPortIndex]
+    const toPort = toType.inputs[conn.toPortIndex]
     if (!fromPort || !toPort) return null
     const num = String(i + 1).padStart(2, '0')
     const fromText = fromDev.name + ' . ' + fromPort.label
@@ -541,6 +553,8 @@ export default function App() {
   useEffect(() => {
     if (_loadWasCorrupt) {
       showToast('检测到本地数据损坏，已加载示例项目。原有数据无法恢复，请从导出的归档恢复')
+    } else if (_loadDroppedDevices > 0) {
+      showToast('已清理 ' + _loadDroppedDevices + ' 个失效设备（设备类型已不存在）', 'info')
     }
   }, [])
 
@@ -843,6 +857,7 @@ export default function App() {
       }
       const targetDevice = devices.find(d => d.id === deviceId)
       const targetType = DEVICE_TYPES[targetDevice.typeId]
+      if (!targetType) { setConnectingFrom(null); return }
       const inputSignal = targetType.inputs[portIndex].signal
       if (inputSignal !== connectingFrom.signalType) {
         showToast('信号类型不匹配')
@@ -1016,8 +1031,11 @@ export default function App() {
       const fromDev = devices.find(d => d.id === conn.fromDeviceId)
       const toDev = devices.find(d => d.id === conn.toDeviceId)
       if (!fromDev || !toDev) return null
-      const fromPort = DEVICE_TYPES[fromDev.typeId].outputs[conn.fromPortIndex]
-      const toPort = DEVICE_TYPES[toDev.typeId].inputs[conn.toPortIndex]
+      const fromType = DEVICE_TYPES[fromDev.typeId]
+      const toType = DEVICE_TYPES[toDev.typeId]
+      if (!fromType || !toType) return null
+      const fromPort = fromType.outputs[conn.fromPortIndex]
+      const toPort = toType.inputs[conn.toPortIndex]
       if (!fromPort || !toPort) return null
       const num = String(i + 1).padStart(2, '0')
       return num + '  ' + fromDev.name + ' . ' + fromPort.label + '  -->  ' + toDev.name + ' . ' + toPort.label
