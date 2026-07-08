@@ -589,6 +589,45 @@ select:focus{border-color:var(--gold)}
   box-shadow:0 4px 16px rgba(0,0,0,.4);
 }
 
+/* ============ ZOOM CONTROLS ============ */
+.zoom-controls{
+  position:absolute;
+  bottom:16px;right:16px;
+  display:flex;
+  align-items:center;
+  gap:4px;
+  background:var(--bg-2);
+  border:1px solid var(--border);
+  border-radius:var(--r-md);
+  padding:4px;
+  z-index:50;
+  box-shadow:0 4px 16px rgba(0,0,0,.4);
+}
+.zoom-btn{
+  width:28px;height:28px;
+  border:none;background:transparent;
+  color:var(--text-2);
+  cursor:pointer;
+  border-radius:var(--r-sm);
+  font-size:16px;
+  font-weight:600;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .12s;
+}
+.zoom-btn:hover:not(:disabled){background:var(--bg-3);color:var(--text-1)}
+.zoom-btn:disabled{opacity:.3;cursor:not-allowed}
+.zoom-level{
+  min-width:48px;height:28px;
+  border:none;background:transparent;
+  color:var(--text-2);
+  cursor:pointer;
+  border-radius:var(--r-sm);
+  font-family:'JetBrains Mono',monospace;
+  font-size:11px;
+  font-weight:500;
+}
+.zoom-level:hover{background:var(--bg-3);color:var(--text-1)}
+
 /* ============ PROJECT SELECTOR ============ */
 .project-selector{
   position:relative;

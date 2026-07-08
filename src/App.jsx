@@ -510,10 +510,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('requirements')
   const [toast, setToast] = useState(null)
   const [histories, setHistories] = useState(new Map()) // projectId -> { past: [], future: [] }
+  const [zoom, setZoom] = useState(1)
   const canvasRef = useRef(null)
   const toastTimerRef = useRef(null)
 
   const HISTORY_LIMIT = 50
+  const ZOOM_MIN = 0.25
+  const ZOOM_MAX = 2
 
   const currentProject = projects.find(p => p.id === activeProjectId) || projects[0]
   const devices = currentProject.devices
@@ -590,7 +593,24 @@ export default function App() {
 
   function getCanvasPos(e) {
     const rect = canvasRef.current.getBoundingClientRect()
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    // Divide by zoom: rect is the scaled size, but device coordinates live in unscaled space.
+    return { x: (e.clientX - rect.left) / zoom, y: (e.clientY - rect.top) / zoom }
+  }
+
+  function clampZoom(z) {
+    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z))
+  }
+
+  function zoomIn() { setZoom(z => clampZoom(Math.round((z + 0.1) * 100) / 100)) }
+  function zoomOut() { setZoom(z => clampZoom(Math.round((z - 0.1) * 100) / 100)) }
+  function zoomReset() { setZoom(1) }
+
+  function handleWheel(e) {
+    // Ctrl+wheel to zoom; plain wheel scrolls the container as usual.
+    if (!e.ctrlKey && !e.metaKey) return
+    e.preventDefault()
+    const delta = e.deltaY < 0 ? 0.1 : -0.1
+    setZoom(z => clampZoom(Math.round((z + delta) * 100) / 100))
   }
 
   function updateCurrentProject(updates) {
@@ -1142,8 +1162,8 @@ export default function App() {
 
       <DeviceLibrary onAdd={handleAddDevice} deviceCounts={deviceCounts} />
 
-      <div className="canvas-container" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>
-        <div className="canvas" ref={canvasRef} onMouseDown={handleCanvasMouseDown} onClick={handleCanvasClick}>
+      <div className="canvas-container" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onWheel={handleWheel}>
+        <div className="canvas" ref={canvasRef} onMouseDown={handleCanvasMouseDown} onClick={handleCanvasClick} style={{ transform: 'scale(' + zoom + ')', transformOrigin: '0 0' }}>
           <ConnectionLayer
             connections={connections}
             devices={devices}
@@ -1181,9 +1201,14 @@ export default function App() {
               <p>点击左侧设备库添加设备到画布</p>
             </div>
           )}
-          {toast && (
-            <div className={toast.type === 'info' ? 'info-toast' : 'error-toast'}>{toast.msg}</div>
-          )}
+        </div>
+        {toast && (
+          <div className={toast.type === 'info' ? 'info-toast' : 'error-toast'}>{toast.msg}</div>
+        )}
+        <div className="zoom-controls">
+          <button className="zoom-btn" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} title="缩小 (Ctrl+滚轮)">−</button>
+          <button className="zoom-level" onClick={zoomReset} title="重置缩放">{Math.round(zoom * 100)}%</button>
+          <button className="zoom-btn" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} title="放大 (Ctrl+滚轮)">+</button>
         </div>
       </div>
 
