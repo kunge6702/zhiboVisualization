@@ -507,6 +507,7 @@ export default function App() {
   const [selectedConn, setSelectedConn] = useState(null)
   const [selectedDevices, setSelectedDevices] = useState(new Set())
   const [selBox, setSelBox] = useState(null)
+  const [panning, setPanning] = useState(null) // { startClientX, startClientY, scrollLeft, scrollTop }
   const [activeTab, setActiveTab] = useState('requirements')
   const [toast, setToast] = useState(null)
   const [histories, setHistories] = useState(new Map()) // projectId -> { past: [], future: [] }
@@ -574,11 +575,12 @@ export default function App() {
         if (selectedDevices.size > 0) setSelectedDevices(new Set())
         if (selBox) setSelBox(null)
         if (dragging) setDragging(null)
+        if (panning) setPanning(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [connectingFrom, selectedConn, selectedDevices, selBox, dragging, histories, currentProject.id])
+  }, [connectingFrom, selectedConn, selectedDevices, selBox, dragging, panning, histories, currentProject.id])
 
   const deviceCounts = useMemo(() => {
     const counts = {}
@@ -882,6 +884,15 @@ export default function App() {
   }
 
   function handleMouseMove(e) {
+    if (panning) {
+      const container = canvasContainerRef.current
+      if (!container) return
+      const dx = e.clientX - panning.startClientX
+      const dy = e.clientY - panning.startClientY
+      container.scrollLeft = panning.scrollLeft - dx
+      container.scrollTop = panning.scrollTop - dy
+      return
+    }
     if (!canvasRef.current) return
     const pos = getCanvasPos(e)
     if (dragging) {
@@ -921,7 +932,8 @@ export default function App() {
     }
   }
 
-  function handleMouseUp() {
+  function handleMouseUp(e) {
+    if (panning) { setPanning(null); return }
     if (dragging) setDragging(null)
     if (selBox) {
       const dx = Math.abs(selBox.curX - selBox.startX)
@@ -934,11 +946,29 @@ export default function App() {
   }
 
   function handleCanvasMouseDown(e) {
+    // Right button (button===2): start panning.
+    if (e.button === 2) {
+      const container = canvasContainerRef.current
+      if (!container) return
+      setPanning({
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        scrollLeft: container.scrollLeft,
+        scrollTop: container.scrollTop,
+      })
+      return
+    }
+    // Left button (button===0): start selection box (existing behavior).
     const pos = getCanvasPos(e)
     setSelBox({ startX: pos.x, startY: pos.y, curX: pos.x, curY: pos.y })
     setSelectedDevices(new Set())
     setConnectingFrom(null)
     setSelectedConn(null)
+  }
+
+  function handleContextMenu(e) {
+    // Suppress browser context menu on the canvas so right-drag pans cleanly.
+    e.preventDefault()
   }
 
   function handleCanvasClick() {
@@ -1171,7 +1201,7 @@ export default function App() {
       <DeviceLibrary onAdd={handleAddDevice} deviceCounts={deviceCounts} />
 
       <div className="canvas-container" ref={canvasContainerRef} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>
-        <div className="canvas" ref={canvasRef} onMouseDown={handleCanvasMouseDown} onClick={handleCanvasClick} style={{ transform: 'scale(' + zoom + ')', transformOrigin: '0 0' }}>
+        <div className="canvas" ref={canvasRef} onMouseDown={handleCanvasMouseDown} onClick={handleCanvasClick} onContextMenu={handleContextMenu} style={{ transform: 'scale(' + zoom + ')', transformOrigin: '0 0', cursor: panning ? 'grabbing' : 'default' }}>
           <ConnectionLayer
             connections={connections}
             devices={devices}
