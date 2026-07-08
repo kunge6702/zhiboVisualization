@@ -540,8 +540,11 @@ export default function App() {
   const [selBox, setSelBox] = useState(null)
   const [activeTab, setActiveTab] = useState('requirements')
   const [toast, setToast] = useState(null)
+  const [histories, setHistories] = useState(new Map()) // projectId -> { past: [], future: [] }
   const canvasRef = useRef(null)
   const toastTimerRef = useRef(null)
+
+  const HISTORY_LIMIT = 50
 
   const currentProject = projects.find(p => p.id === activeProjectId) || projects[0]
   const devices = currentProject.devices
@@ -573,9 +576,25 @@ export default function App() {
     }
   }, [projects, activeProjectId])
 
-  // Escape key to cancel connection / deselect
+  // Escape to cancel connection / deselect; Ctrl+Z/Y for undo/redo.
   useEffect(() => {
     function handleKeyDown(e) {
+      // Don't hijack undo/redo while editing text (let the browser handle native undo in inputs).
+      const tag = document.activeElement && document.activeElement.tagName
+      const editingText = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        if (editingText) return
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+        return
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+        if (editingText) return
+        e.preventDefault()
+        redo()
+        return
+      }
       if (e.key === 'Escape') {
         if (connectingFrom) setConnectingFrom(null)
         if (selectedConn) setSelectedConn(null)
@@ -586,7 +605,7 @@ export default function App() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [connectingFrom, selectedConn, selectedDevices, selBox, dragging])
+  }, [connectingFrom, selectedConn, selectedDevices, selBox, dragging, histories, currentProject.id])
 
   const deviceCounts = useMemo(() => {
     const counts = {}
@@ -610,6 +629,78 @@ export default function App() {
       p.id === currentProject.id ? { ...p, ...updates } : p
     ))
   }
+
+  /* ----- UNDO / REDO (structural changes only, per-project stacks) ----- */
+  function snapshotCurrent() {
+    // Deep copy the current project's data arrays (devices/connections/requirements).
+    return {
+      devices: JSON.parse(JSON.stringify(currentProject.devices)),
+      connections: JSON.parse(JSON.stringify(currentProject.connections)),
+      requirements: JSON.parse(JSON.stringify(currentProject.requirements)),
+    }
+  }
+
+  function pushHistory(snapshot) {
+    setHistories(prev => {
+      const next = new Map(prev)
+      const entry = next.get(currentProject.id) || { past: [], future: [] }
+      const past = [...entry.past, snapshot]
+      if (past.length > HISTORY_LIMIT) past.shift()
+      next.set(currentProject.id, { past, future: [] })
+      return next
+    })
+  }
+
+  // Structural change: snapshot current state, then apply updates. Use instead of
+  // updateCurrentProject for add/delete/rename/connect (NOT for drag).
+  function commitProject(updates) {
+    pushHistory(snapshotCurrent())
+    updateCurrentProject(updates)
+  }
+
+  // Structural change replacing the whole projects array (create/duplicate/delete/rename project).
+  function commitProjects(newProjects) {
+    pushHistory(snapshotCurrent())
+    setProjects(newProjects)
+  }
+
+  function undo() {
+    const entry = histories.get(currentProject.id)
+    if (!entry || entry.past.length === 0) return
+    const past = [...entry.past]
+    const prevSnapshot = past.pop()
+    const currentSnapshot = snapshotCurrent()
+    setHistories(h => {
+      const next = new Map(h)
+      next.set(currentProject.id, { past, future: [currentSnapshot, ...entry.future] })
+      return next
+    })
+    setProjects(prev => prev.map(p =>
+      p.id === currentProject.id ? { ...p, ...prevSnapshot } : p
+    ))
+  }
+
+  function redo() {
+    const entry = histories.get(currentProject.id)
+    if (!entry || entry.future.length === 0) return
+    const future = [...entry.future]
+    const nextSnapshot = future.shift()
+    const currentSnapshot = snapshotCurrent()
+    setHistories(h => {
+      const next = new Map(h)
+      const past = [...entry.past, currentSnapshot]
+      if (past.length > HISTORY_LIMIT) past.shift()
+      next.set(currentProject.id, { past, future })
+      return next
+    })
+    setProjects(prev => prev.map(p =>
+      p.id === currentProject.id ? { ...p, ...nextSnapshot } : p
+    ))
+  }
+
+  const currentHistory = histories.get(currentProject.id) || { past: [], future: [] }
+  const canUndo = currentHistory.past.length > 0
+  const canRedo = currentHistory.future.length > 0
 
   /* ----- PROJECT OPERATIONS ----- */
   function handleCreateProject() {
@@ -693,7 +784,7 @@ export default function App() {
   }
 
   function handleRenameProject(projectId, newName) {
-    setProjects(prev => prev.map(p =>
+    commitProjects(projects.map(p =>
       p.id === projectId ? { ...p, name: newName } : p
     ))
   }
@@ -713,11 +804,11 @@ export default function App() {
       x: 100 + Math.random() * 150,
       y: 100 + Math.random() * 150,
     }
-    updateCurrentProject({ devices: [...devices, newDev] })
+    commitProject({ devices: [...devices, newDev] })
   }
 
   function handleRenameDevice(deviceId, newName) {
-    updateCurrentProject({
+    commitProject({
       devices: devices.map(d =>
         d.id === deviceId ? { ...d, name: newName } : d
       )
@@ -766,7 +857,7 @@ export default function App() {
         toPortIndex: portIndex,
         signalType: connectingFrom.signalType,
       }
-      updateCurrentProject({ connections: [...connections, newConn] })
+      commitProject({ connections: [...connections, newConn] })
       setConnectingFrom(null)
     }
   }
@@ -859,7 +950,7 @@ export default function App() {
   }
 
   function handleDeleteDevice(deviceId) {
-    updateCurrentProject({
+    commitProject({
       devices: devices.filter(d => d.id !== deviceId),
       connections: connections.filter(c => c.fromDeviceId !== deviceId && c.toDeviceId !== deviceId),
       requirements: requirements.filter(r => r.sourceDeviceId !== deviceId && r.destDeviceId !== deviceId),
@@ -874,20 +965,20 @@ export default function App() {
   }
 
   function handleDeleteConnection(connId) {
-    updateCurrentProject({
+    commitProject({
       connections: connections.filter(c => c.id !== connId)
     })
     setSelectedConn(null)
   }
 
   function handleAddRequirement(srcId, dstId, sigType) {
-    updateCurrentProject({
+    commitProject({
       requirements: [...requirements, { id: uid('r'), sourceDeviceId: srcId, destDeviceId: dstId, signalType: sigType }]
     })
   }
 
   function handleDeleteRequirement(reqId) {
-    updateCurrentProject({
+    commitProject({
       requirements: requirements.filter(r => r.id !== reqId)
     })
   }
@@ -1074,6 +1165,8 @@ export default function App() {
           <span>需求 <b>{requirements.length}</b></span>
         </div>
         <div className="toolbar-actions">
+          <button className="btn" onClick={undo} disabled={!canUndo} title="撤销 (Ctrl+Z)">↶ 撤销</button>
+          <button className="btn" onClick={redo} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)">↷ 重做</button>
           <button className="btn btn-primary" onClick={handleCreateProject}>新建项目</button>
         </div>
       </div>
