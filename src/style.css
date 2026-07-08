@@ -592,7 +592,7 @@ select:focus{border-color:var(--gold)}
 /* ============ ZOOM CONTROLS ============ */
 .zoom-controls{
   position:absolute;
-  bottom:16px;right:16px;
+  bottom:16px;left:16px;
   display:flex;
   align-items:center;
   gap:4px;

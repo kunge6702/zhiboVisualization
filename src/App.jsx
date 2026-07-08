@@ -512,6 +512,7 @@ export default function App() {
   const [histories, setHistories] = useState(new Map()) // projectId -> { past: [], future: [] }
   const [zoom, setZoom] = useState(1)
   const canvasRef = useRef(null)
+  const canvasContainerRef = useRef(null)
   const toastTimerRef = useRef(null)
 
   const HISTORY_LIMIT = 50
@@ -605,13 +606,20 @@ export default function App() {
   function zoomOut() { setZoom(z => clampZoom(Math.round((z - 0.1) * 100) / 100)) }
   function zoomReset() { setZoom(1) }
 
-  function handleWheel(e) {
-    // Ctrl+wheel to zoom; plain wheel scrolls the container as usual.
-    if (!e.ctrlKey && !e.metaKey) return
-    e.preventDefault()
-    const delta = e.deltaY < 0 ? 0.1 : -0.1
-    setZoom(z => clampZoom(Math.round((z + delta) * 100) / 100))
-  }
+  // Ctrl+wheel to zoom. Registered as a non-passive listener so preventDefault works
+  // (React's onWheel is passive, so the browser zoom would also fire).
+  useEffect(() => {
+    const el = canvasContainerRef.current
+    if (!el) return
+    function onWheel(e) {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const delta = e.deltaY < 0 ? 0.1 : -0.1
+      setZoom(z => clampZoom(Math.round((z + delta) * 100) / 100))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   function updateCurrentProject(updates) {
     setProjects(prev => prev.map(p =>
@@ -1162,7 +1170,7 @@ export default function App() {
 
       <DeviceLibrary onAdd={handleAddDevice} deviceCounts={deviceCounts} />
 
-      <div className="canvas-container" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onWheel={handleWheel}>
+      <div className="canvas-container" ref={canvasContainerRef} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>
         <div className="canvas" ref={canvasRef} onMouseDown={handleCanvasMouseDown} onClick={handleCanvasClick} style={{ transform: 'scale(' + zoom + ')', transformOrigin: '0 0' }}>
           <ConnectionLayer
             connections={connections}
