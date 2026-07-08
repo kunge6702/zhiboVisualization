@@ -281,3 +281,34 @@ export function buildTopologySVG(devices, connections, getDeviceType) {
 function escapeXML(s) {
   return String(s).replace(/[<>&"']/g, ch => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[ch]))
 }
+
+/**
+ * Validate an imported project archive (ADR-0005).
+ * Pure function - no JSX dependency, lives here so it can be unit-tested.
+ *
+ * @returns { ok: true } or { ok: false, reason: string }
+ */
+export function validateProjectArchive(archive) {
+  if (!archive || typeof archive !== 'object') return { ok: false, reason: '文件不是有效的 JSON 对象' }
+  if (archive.kind !== 'signal-route-planner-project') return { ok: false, reason: '不是信号路由规划项目归档（kind 不匹配）' }
+  if (archive.version !== 1) return { ok: false, reason: '不支持的归档版本：' + archive.version }
+  const proj = archive.project
+  if (!proj || typeof proj !== 'object') return { ok: false, reason: '归档缺少 project 字段' }
+  if (typeof proj.name !== 'string') return { ok: false, reason: '项目缺少名称' }
+  if (!Array.isArray(proj.devices)) return { ok: false, reason: '设备清单缺失或非数组' }
+  if (!Array.isArray(proj.connections)) return { ok: false, reason: '连线清单缺失或非数组' }
+  if (!Array.isArray(proj.requirements)) return { ok: false, reason: '需求清单缺失或非数组' }
+  for (const d of proj.devices) {
+    if (!DEVICE_TYPES[d.typeId]) return { ok: false, reason: '未知设备类型：' + d.typeId }
+  }
+  const deviceIds = new Set(proj.devices.map(d => d.id))
+  for (const c of proj.connections) {
+    if (!deviceIds.has(c.fromDeviceId)) return { ok: false, reason: '连线引用了不存在的设备：' + c.fromDeviceId }
+    if (!deviceIds.has(c.toDeviceId)) return { ok: false, reason: '连线引用了不存在的设备：' + c.toDeviceId }
+  }
+  for (const r of proj.requirements) {
+    if (!deviceIds.has(r.sourceDeviceId)) return { ok: false, reason: '需求引用了不存在的设备：' + r.sourceDeviceId }
+    if (!deviceIds.has(r.destDeviceId)) return { ok: false, reason: '需求引用了不存在的设备：' + r.destDeviceId }
+  }
+  return { ok: true }
+}

@@ -4,7 +4,7 @@ import {
   INITIAL_DEVICES, INITIAL_CONNECTIONS, INITIAL_REQUIREMENTS,
 } from './constants.js'
 import { Icons } from './icons.jsx'
-import { uid, initUidCounter, getPortPos, getConnPath, validateRequirements, isOccupied, getDeviceHeight, rectIntersect, buildTopologySVG } from './utils.js'
+import { uid, initUidCounter, getPortPos, getConnPath, validateRequirements, validateProjectArchive, isOccupied, getDeviceHeight, rectIntersect, buildTopologySVG } from './utils.js'
 
 const STORAGE_KEY = 'signal-route-planner-v1'
 
@@ -55,37 +55,6 @@ function loadActiveProjectId() {
     }
   } catch (e) {}
   return null
-}
-
-/* ============ PROJECT ARCHIVE VALIDATION ============ */
-// Validates an imported JSON archive. Returns { ok: true } or { ok: false, reason }.
-// Checks: archive shape, version, project sub-object, and that every device typeId exists in DEVICE_TYPES.
-// Also verifies connection/requirement referential integrity against the imported device set.
-export function validateProjectArchive(archive) {
-  if (!archive || typeof archive !== 'object') return { ok: false, reason: '文件不是有效的 JSON 对象' }
-  if (archive.kind !== 'signal-route-planner-project') return { ok: false, reason: '不是信号路由规划项目归档（kind 不匹配）' }
-  if (archive.version !== 1) return { ok: false, reason: '不支持的归档版本：' + archive.version }
-  const proj = archive.project
-  if (!proj || typeof proj !== 'object') return { ok: false, reason: '归档缺少 project 字段' }
-  if (typeof proj.name !== 'string') return { ok: false, reason: '项目缺少名称' }
-  if (!Array.isArray(proj.devices)) return { ok: false, reason: '设备清单缺失或非数组' }
-  if (!Array.isArray(proj.connections)) return { ok: false, reason: '连线清单缺失或非数组' }
-  if (!Array.isArray(proj.requirements)) return { ok: false, reason: '需求清单缺失或非数组' }
-  // Every device must reference a known typeId.
-  for (const d of proj.devices) {
-    if (!DEVICE_TYPES[d.typeId]) return { ok: false, reason: '未知设备类型：' + d.typeId }
-  }
-  // Referential integrity: connections reference imported device ids.
-  const deviceIds = new Set(proj.devices.map(d => d.id))
-  for (const c of proj.connections) {
-    if (!deviceIds.has(c.fromDeviceId)) return { ok: false, reason: '连线引用了不存在的设备：' + c.fromDeviceId }
-    if (!deviceIds.has(c.toDeviceId)) return { ok: false, reason: '连线引用了不存在的设备：' + c.toDeviceId }
-  }
-  for (const r of proj.requirements) {
-    if (!deviceIds.has(r.sourceDeviceId)) return { ok: false, reason: '需求引用了不存在的设备：' + r.sourceDeviceId }
-    if (!deviceIds.has(r.destDeviceId)) return { ok: false, reason: '需求引用了不存在的设备：' + r.destDeviceId }
-  }
-  return { ok: true }
 }
 
 /* ============ PROJECT SELECTOR ============ */

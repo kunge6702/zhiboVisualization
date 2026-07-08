@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findRoute, validateRequirements, buildTopologySVG } from './utils.js'
+import { findRoute, validateRequirements, buildTopologySVG, validateProjectArchive } from './utils.js'
 import { DEVICE_TYPES } from './constants.js'
 
 // Build a getDeviceType callback from a devices array (same shape as project devices).
@@ -197,5 +197,94 @@ describe('buildTopologySVG', () => {
   it('returns a placeholder SVG when there are no devices', () => {
     const svg = buildTopologySVG([], [], typeResolver([]))
     expect(svg).toContain('暂无设备')
+  })
+})
+
+describe('validateProjectArchive', () => {
+  // A minimal valid archive shape, reused across cases.
+  function validArchive() {
+    return {
+      kind: 'signal-route-planner-project',
+      version: 1,
+      project: {
+        name: '测试项目',
+        devices: [
+          { id: 'd1', typeId: 'camera_sony', name: '摄像机', x: 0, y: 0 },
+          { id: 'd2', typeId: 'large_screen', name: '大屏', x: 200, y: 0 },
+        ],
+        connections: [
+          { id: 'c1', fromDeviceId: 'd1', fromPortIndex: 0, toDeviceId: 'd2', toPortIndex: 0, signalType: 'video' },
+        ],
+        requirements: [
+          { id: 'r1', sourceDeviceId: 'd1', destDeviceId: 'd2', signalType: 'video' },
+        ],
+      },
+    }
+  }
+
+  it('accepts a well-formed archive', () => {
+    expect(validateProjectArchive(validArchive())).toEqual({ ok: true })
+  })
+
+  it('rejects non-object input', () => {
+    expect(validateProjectArchive(null).ok).toBe(false)
+    expect(validateProjectArchive('not an object').ok).toBe(false)
+    expect(validateProjectArchive(42).ok).toBe(false)
+  })
+
+  it('rejects wrong kind', () => {
+    const a = validArchive()
+    a.kind = 'something-else'
+    const r = validateProjectArchive(a)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('kind')
+  })
+
+  it('rejects unsupported version', () => {
+    const a = validArchive()
+    a.version = 2
+    const r = validateProjectArchive(a)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('版本')
+  })
+
+  it('rejects unknown device typeId', () => {
+    const a = validArchive()
+    a.project.devices[0].typeId = 'nonexistent_device'
+    const r = validateProjectArchive(a)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('nonexistent_device')
+  })
+
+  it('rejects connection referencing a non-existent device', () => {
+    const a = validArchive()
+    a.project.connections[0].toDeviceId = 'ghost-device'
+    const r = validateProjectArchive(a)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('ghost-device')
+  })
+
+  it('rejects requirement referencing a non-existent device', () => {
+    const a = validArchive()
+    a.project.requirements[0].destDeviceId = 'ghost-device'
+    const r = validateProjectArchive(a)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('ghost-device')
+  })
+
+  it('rejects missing project field', () => {
+    const a = validArchive()
+    delete a.project
+    const r = validateProjectArchive(a)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('project')
+  })
+
+  it('rejects non-array devices', () => {
+    const a = validArchive()
+    a.project.devices = 'not an array'
+    const r = validateProjectArchive(a)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('设备清单')
   })
 })
