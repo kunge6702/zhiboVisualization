@@ -1209,15 +1209,15 @@ export default function App() {
               <p>点击左侧设备库添加设备到画布</p>
             </div>
           )}
+          <div className="zoom-controls" style={{ transform: 'scale(' + (1 / zoom) + ')', transformOrigin: 'bottom left' }}>
+            <button className="zoom-btn" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} title="缩小 (Ctrl+滚轮)">−</button>
+            <button className="zoom-level" onClick={zoomReset} title="重置缩放">{Math.round(zoom * 100)}%</button>
+            <button className="zoom-btn" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} title="放大 (Ctrl+滚轮)">+</button>
+          </div>
         </div>
         {toast && (
           <div className={toast.type === 'info' ? 'info-toast' : 'error-toast'}>{toast.msg}</div>
         )}
-        <div className="zoom-controls">
-          <button className="zoom-btn" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} title="缩小 (Ctrl+滚轮)">−</button>
-          <button className="zoom-level" onClick={zoomReset} title="重置缩放">{Math.round(zoom * 100)}%</button>
-          <button className="zoom-btn" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} title="放大 (Ctrl+滚轮)">+</button>
-        </div>
       </div>
 
       <div className="side-panel">
