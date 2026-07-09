@@ -1,15 +1,16 @@
 import { useState, useMemo } from 'react'
-import { DEVICE_TYPES } from '../constants.js'
+import { BUILTIN_DEVICE_TYPES } from '../constants.js'
 import { validateRequirements } from '../utils.js'
 
-export function RequirementsTab({ devices, connections, requirements, onAdd, onDelete }) {
+export function RequirementsTab({ devices, connections, requirements, deviceTypes, onAdd, onDelete }) {
+  const types = deviceTypes || BUILTIN_DEVICE_TYPES
   const [srcId, setSrcId] = useState('')
   const [dstId, setDstId] = useState('')
   const [sigType, setSigType] = useState('video')
 
   const getDeviceType = (deviceId) => {
     const dev = devices.find(d => d.id === deviceId)
-    return dev ? DEVICE_TYPES[dev.typeId] : undefined
+    return dev ? types[dev.typeId] : undefined
   }
 
   const validation = useMemo(() => {

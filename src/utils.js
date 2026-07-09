@@ -1,4 +1,4 @@
-import { HEADER_HEIGHT, PORT_PADDING, PORT_ROW, DEVICE_WIDTH, COLORS, CAT_COLORS, DEVICE_TYPES } from './constants.js'
+import { HEADER_HEIGHT, PORT_PADDING, PORT_ROW, DEVICE_WIDTH, COLORS, CAT_COLORS, BUILTIN_DEVICE_TYPES } from './constants.js'
 
 let _idc = 100
 export function uid(p) {
@@ -182,8 +182,9 @@ export function isOccupied(connections, deviceId, portIndex, direction) {
   )
 }
 
-export function getDeviceHeight(device) {
-  const type = DEVICE_TYPES[device.typeId]
+export function getDeviceHeight(device, deviceTypes) {
+  const types = deviceTypes || BUILTIN_DEVICE_TYPES
+  const type = types[device.typeId]
   if (!type) return HEADER_HEIGHT + PORT_PADDING * 2 + PORT_ROW
   const maxPorts = Math.max(type.inputs.length, type.outputs.length)
   return HEADER_HEIGHT + PORT_PADDING * 2 + maxPorts * PORT_ROW
@@ -288,8 +289,9 @@ function escapeXML(s) {
  * Returns { project, dropped } where `dropped` is the count of removed devices.
  * Does not mutate the input.
  */
-export function sanitizeProject(project) {
-  const validDevices = project.devices.filter(d => DEVICE_TYPES[d.typeId])
+export function sanitizeProject(project, deviceTypes) {
+  const types = deviceTypes || BUILTIN_DEVICE_TYPES
+  const validDevices = project.devices.filter(d => types[d.typeId])
   const dropped = project.devices.length - validDevices.length
   if (dropped === 0) return { project, dropped: 0 }
   const validIds = new Set(validDevices.map(d => d.id))
@@ -310,7 +312,8 @@ export function sanitizeProject(project) {
  *
  * @returns { ok: true } or { ok: false, reason: string }
  */
-export function validateProjectArchive(archive) {
+export function validateProjectArchive(archive, deviceTypes) {
+  const types = deviceTypes || BUILTIN_DEVICE_TYPES
   if (!archive || typeof archive !== 'object') return { ok: false, reason: '文件不是有效的 JSON 对象' }
   if (archive.kind !== 'signal-route-planner-project') return { ok: false, reason: '不是信号路由规划项目归档（kind 不匹配）' }
   if (archive.version !== 1) return { ok: false, reason: '不支持的归档版本：' + archive.version }
@@ -321,7 +324,7 @@ export function validateProjectArchive(archive) {
   if (!Array.isArray(proj.connections)) return { ok: false, reason: '连线清单缺失或非数组' }
   if (!Array.isArray(proj.requirements)) return { ok: false, reason: '需求清单缺失或非数组' }
   for (const d of proj.devices) {
-    if (!DEVICE_TYPES[d.typeId]) return { ok: false, reason: '未知设备类型：' + d.typeId }
+    if (!types[d.typeId]) return { ok: false, reason: '未知设备类型：' + d.typeId }
   }
   const deviceIds = new Set(proj.devices.map(d => d.id))
   for (const c of proj.connections) {

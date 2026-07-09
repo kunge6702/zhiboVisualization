@@ -31,8 +31,8 @@ export const CAT_LABELS = {
   display: '显示设备',
 }
 
-// Device type definitions
-export const DEVICE_TYPES = {
+// Built-in device type definitions (immutable). Custom device types are loaded at runtime.
+export const BUILTIN_DEVICE_TYPES = {
   camera_sony: {
     label: '索尼摄像机', category: 'source',
     inputs: [],
@@ -105,6 +105,9 @@ export const DEVICE_TYPES = {
     outputs: [],
   },
 }
+
+// Backward-compatible alias. Prefer BUILTIN_DEVICE_TYPES for clarity; App merges custom types at runtime.
+export const DEVICE_TYPES = BUILTIN_DEVICE_TYPES
 
 // Initial demo state
 export const INITIAL_DEVICES = [

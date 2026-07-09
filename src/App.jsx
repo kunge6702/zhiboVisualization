@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
 import {
-  DEVICE_TYPES, COLORS, CAT_COLORS, CAT_LABELS,
+  BUILTIN_DEVICE_TYPES, COLORS, CAT_COLORS, CAT_LABELS,
   INITIAL_DEVICES, INITIAL_CONNECTIONS, INITIAL_REQUIREMENTS,
 } from './constants.js'
 import { Icons } from './icons.jsx'
@@ -9,10 +9,12 @@ import { ProjectSelector } from './components/ProjectSelector.jsx'
 import { DeviceNode } from './components/DeviceNode.jsx'
 import { ConnectionLayer } from './components/ConnectionLayer.jsx'
 import { DeviceLibrary } from './components/DeviceLibrary.jsx'
+import { DeviceTypeEditor } from './components/DeviceTypeEditor.jsx'
 import { RequirementsTab } from './components/RequirementsTab.jsx'
 import { WiringPlanTab } from './components/WiringPlanTab.jsx'
 
 const STORAGE_KEY = 'signal-route-planner-v1'
+const CUSTOM_TYPES_KEY = 'signal-route-planner-custom-types'
 
 /* ============ STORAGE HELPERS ============ */
 let _loadWasCorrupt = false
@@ -35,8 +37,11 @@ function loadProjects() {
     const data = JSON.parse(raw)
     if (data && data.projects && data.projects.length > 0) {
       // Sanitize: drop devices whose typeId no longer exists (e.g. after device-library changes).
+      // Include custom device types so projects referencing them aren't incorrectly pruned.
+      const customTypes = loadCustomDeviceTypes()
+      const mergedTypes = { ...BUILTIN_DEVICE_TYPES, ...customTypes }
       const sanitized = data.projects.map(p => {
-        const { project, dropped } = sanitizeProject(p)
+        const { project, dropped } = sanitizeProject(p, mergedTypes)
         _loadDroppedDevices += dropped
         return project
       })
@@ -70,6 +75,14 @@ function loadActiveProjectId() {
   return null
 }
 
+function loadCustomDeviceTypes() {
+  try {
+    const data = JSON.parse(localStorage.getItem(CUSTOM_TYPES_KEY))
+    if (data && typeof data === 'object') return data
+  } catch (e) {}
+  return {}
+}
+
 /* ============ APP ============ */
 export default function App() {
   const [projects, setProjects] = useState(loadProjects)
@@ -86,6 +99,8 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [histories, setHistories] = useState(new Map()) // projectId -> { past: [], future: [] }
   const [zoom, setZoom] = useState(1)
+  const [customDeviceTypes, setCustomDeviceTypes] = useState(loadCustomDeviceTypes)
+  const [editingDeviceType, setEditingDeviceType] = useState(null) // null | { typeId?, isNew } for DeviceTypeEditor
   const canvasRef = useRef(null)
   const canvasContainerRef = useRef(null)
   const toastTimerRef = useRef(null)
@@ -93,6 +108,9 @@ export default function App() {
   const HISTORY_LIMIT = 50
   const ZOOM_MIN = 0.25
   const ZOOM_MAX = 2
+
+  // Merge built-in + custom device types. Passed to components and pure functions.
+  const allDeviceTypes = useMemo(() => ({ ...BUILTIN_DEVICE_TYPES, ...customDeviceTypes }), [customDeviceTypes])
 
   const currentProject = projects.find(p => p.id === activeProjectId) || projects[0]
   const devices = currentProject.devices
@@ -105,10 +123,19 @@ export default function App() {
       const activeId = activeProjectId || (projects[0] && projects[0].id)
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects, activeProjectId: activeId }))
     } catch (e) {
-      // Quota exceeded or storage unavailable — surface to user, don't silently lose.
+      // Quota exceeded or storage unavailable - surface to user, don't silently lose.
       showToast('保存失败，建议立即导出项目归档')
     }
   }, [projects, activeProjectId])
+
+  // Persist custom device types to localStorage (separate key, shared across projects)
+  useEffect(() => {
+    try {
+      localStorage.setItem(CUSTOM_TYPES_KEY, JSON.stringify(customDeviceTypes))
+    } catch (e) {
+      showToast('自定义设备保存失败')
+    }
+  }, [customDeviceTypes])
 
   // One-time: warn if local data was corrupt on load (ADR-0005 — informed failure).
   useEffect(() => {
@@ -366,7 +393,7 @@ export default function App() {
 
   /* ----- DEVICE OPERATIONS ----- */
   function handleAddDevice(typeId) {
-    const type = DEVICE_TYPES[typeId]
+    const type = allDeviceTypes[typeId]
     const sameType = devices.filter(d => d.typeId === typeId)
     const maxNum = sameType.reduce((max, d) => {
       const m = d.name.match(/(\d+)$/)
@@ -417,7 +444,7 @@ export default function App() {
         return
       }
       const targetDevice = devices.find(d => d.id === deviceId)
-      const targetType = DEVICE_TYPES[targetDevice.typeId]
+      const targetType = allDeviceTypes[targetDevice.typeId]
       if (!targetType) { setConnectingFrom(null); return }
       const inputSignal = targetType.inputs[portIndex].signal
       if (inputSignal !== connectingFrom.signalType) {
@@ -592,8 +619,8 @@ export default function App() {
       const fromDev = devices.find(d => d.id === conn.fromDeviceId)
       const toDev = devices.find(d => d.id === conn.toDeviceId)
       if (!fromDev || !toDev) return null
-      const fromType = DEVICE_TYPES[fromDev.typeId]
-      const toType = DEVICE_TYPES[toDev.typeId]
+      const fromType = allDeviceTypes[fromDev.typeId]
+      const toType = allDeviceTypes[toDev.typeId]
       if (!fromType || !toType) return null
       const fromPort = fromType.outputs[conn.fromPortIndex]
       const toPort = toType.inputs[conn.toPortIndex]
@@ -710,7 +737,7 @@ export default function App() {
     }
     const getDeviceType = (deviceId) => {
       const dev = devices.find(d => d.id === deviceId)
-      return dev ? DEVICE_TYPES[dev.typeId] : undefined
+      return dev ? allDeviceTypes[dev.typeId] : undefined
     }
     const svg = buildTopologySVG(devices, connections, getDeviceType)
     const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
@@ -748,6 +775,40 @@ export default function App() {
     img.src = url
   }
 
+  /* ----- CUSTOM DEVICE TYPES (CRUD) ----- */
+  function handleSaveDeviceType(typeDef) {
+    // typeDef: { typeId?, label, category, icon?, inputs, outputs }
+    // Generate typeId for new types; reuse for edits.
+    const typeId = typeDef.typeId || ('custom_' + uid('ct'))
+    setCustomDeviceTypes(prev => ({
+      ...prev,
+      [typeId]: {
+        label: typeDef.label,
+        category: typeDef.category,
+        ...(typeDef.icon ? { icon: typeDef.icon } : {}),
+        inputs: typeDef.inputs,
+        outputs: typeDef.outputs,
+      },
+    }))
+    setEditingDeviceType(null)
+    showToast(typeDef.typeId ? '设备类型已更新' : '设备类型已创建', 'info')
+  }
+
+  function handleDeleteDeviceType(typeId) {
+    // Check if any project uses this type.
+    const inUse = projects.some(p => p.devices.some(d => d.typeId === typeId))
+    if (inUse) {
+      showToast('有项目正在使用该设备类型，无法删除')
+      return
+    }
+    setCustomDeviceTypes(prev => {
+      const next = { ...prev }
+      delete next[typeId]
+      return next
+    })
+    showToast('设备类型已删除', 'info')
+  }
+
   return (
     <div className="app">
       <div className="toolbar">
@@ -778,7 +839,7 @@ export default function App() {
         </div>
       </div>
 
-      <DeviceLibrary onAdd={handleAddDevice} deviceCounts={deviceCounts} />
+      <DeviceLibrary onAdd={handleAddDevice} deviceCounts={deviceCounts} deviceTypes={allDeviceTypes} customDeviceTypes={customDeviceTypes} onCreateDeviceType={() => setEditingDeviceType({ isNew: true })} onEditDeviceType={(typeId) => setEditingDeviceType({ typeId, isNew: false })} onDeleteDeviceType={handleDeleteDeviceType} />
 
       <div className="canvas-container" ref={canvasContainerRef} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseEnter={() => setCanvasHovered(true)} onMouseLeave={() => setCanvasHovered(false)}>
         <div className="canvas" ref={canvasRef} onMouseDown={handleCanvasMouseDown} onClick={handleCanvasClick} onContextMenu={handleContextMenu} style={{ transform: 'scale(' + zoom + ')', transformOrigin: '0 0', cursor: panning ? 'grabbing' : 'default' }}>
@@ -803,7 +864,7 @@ export default function App() {
             <DeviceNode
               key={d.id}
               device={d}
-              type={DEVICE_TYPES[d.typeId]}
+              type={allDeviceTypes[d.typeId]}
               connections={connections}
               connectingFrom={connectingFrom}
               selected={selectedDevices.has(d.id)}
@@ -841,6 +902,7 @@ export default function App() {
               devices={devices}
               connections={connections}
               requirements={requirements}
+              deviceTypes={allDeviceTypes}
               onAdd={handleAddRequirement}
               onDelete={handleDeleteRequirement}
             />
@@ -848,12 +910,21 @@ export default function App() {
             <WiringPlanTab
               connections={connections}
               devices={devices}
+              deviceTypes={allDeviceTypes}
               onExport={handleExport}
               onExportTopology={handleExportTopology}
             />
           )}
         </div>
       </div>
+      {editingDeviceType && (
+        <DeviceTypeEditor
+          mode={editingDeviceType}
+          existingType={editingDeviceType.typeId ? { typeId: editingDeviceType.typeId, ...customDeviceTypes[editingDeviceType.typeId] } : null}
+          onSave={handleSaveDeviceType}
+          onCancel={() => setEditingDeviceType(null)}
+        />
+      )}
     </div>
   )
 }

@@ -1,12 +1,13 @@
-import { DEVICE_TYPES } from '../constants.js'
+import { BUILTIN_DEVICE_TYPES } from '../constants.js'
 
-export function WiringPlanTab({ connections, devices, onExport, onExportTopology }) {
+export function WiringPlanTab({ connections, devices, deviceTypes, onExport, onExportTopology }) {
+  const types = deviceTypes || BUILTIN_DEVICE_TYPES
   const lines = connections.map((conn, i) => {
     const fromDev = devices.find(d => d.id === conn.fromDeviceId)
     const toDev = devices.find(d => d.id === conn.toDeviceId)
     if (!fromDev || !toDev) return null
-    const fromType = DEVICE_TYPES[fromDev.typeId]
-    const toType = DEVICE_TYPES[toDev.typeId]
+    const fromType = types[fromDev.typeId]
+    const toType = types[toDev.typeId]
     if (!fromType || !toType) return null
     const fromPort = fromType.outputs[conn.fromPortIndex]
     const toPort = toType.inputs[conn.toPortIndex]
